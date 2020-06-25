@@ -1,14 +1,15 @@
 # -*- coding: utf-8 -*-
 from __future__ import print_function
 
-import click
-import crayons
 import os
 import sys
 
+import click
+import crayons
+
+from pycycle.utils import read_project, detect_cycles
 # local imports
 from .__version__ import __version__
-from pycycle.utils import read_project, get_cycle_path, check_if_cycles_exist
 
 
 def format_help(_help):
@@ -67,19 +68,18 @@ def cli(ctx, verbose=False, help=False, source=None, here=False, ignore='', enco
             click.echo(crayons.red('Directory does not exist.'), err=True)
             sys.exit(1)
 
-        root_node = read_project(source, verbose=verbose, ignore=ignore.split(','), encoding=encoding)
+        root_nodes = read_project(source, verbose=verbose, ignore=ignore.split(','), encoding=encoding)
 
         click.echo(crayons.yellow(
             'Project successfully transformed to AST, checking imports for cycles..'))
 
-        if check_if_cycles_exist(root_node):
+        cycles = detect_cycles(root_nodes)
+        if cycles:
             click.echo(crayons.red('Cycle Found :('))
-            click.echo(crayons.red(get_cycle_path(root_node)))
-            click.echo(crayons.green("Finished."))
+            for descr in cycles:
+                click.echo(descr)
             sys.exit(1)
-        else:
-            click.echo(crayons.green(('No worries, no cycles here!')))
-            click.echo(crayons.green(
-                'If you think some cycle was missed, please open an Issue on Github.'))
-            click.echo(crayons.green("Finished."))
-            sys.exit(0)
+
+        click.echo(crayons.green(('No worries, no cycles here!')))
+        click.echo(crayons.green('If you think some cycle was missed, please open an Issue on Github.'))
+        sys.exit(0)

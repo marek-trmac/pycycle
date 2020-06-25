@@ -1,4 +1,4 @@
-from a_module.a_file import a_func
+from a_package.a_file import a_func
 
 
 if __name__ == '__main__':
