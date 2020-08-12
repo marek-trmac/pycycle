@@ -237,8 +237,7 @@ def _detect_cycles(node: Node, path: List[Node], cycles: Dict[str, List[Node]], 
     new_path.append(node)
     if verbose:
         path_str = '/'.join([node.name for node in new_path])
-        click.echo(crayons.yellow('Checking path: {path_str}'))
-    print()
+        click.echo(crayons.white(f'Checking path: {path_str}'))
     for item in node.imports:
         if _detect_cycles(item, new_path, cycles, verbose):
             result = True
@@ -304,12 +303,14 @@ def detect_cycles(nodes: Iterable[Node], verbose: bool = False) -> List[str]:
     # first detect cycles from root nodes
     for node in nodes:
         if len(node.is_imported_from) == 0:
-            print('### Checking root node: ' + node.name)
+            if verbose:
+                click.echo(crayons.yellow('### Checking root node: ' + node.name))
             _detect_cycles(node, list(), cycles, verbose)
     # second detect cycles from non-root nodes
     for node in nodes:
         if len(node.is_imported_from) > 0:
-            print('### Checking non-root node: ' + node.name)
+            if verbose:
+                click.echo(crayons.yellow('### Checking non-root node: ' + node.name))
             _detect_cycles(node, list(), cycles, verbose)
 
     # remove duplicated cycles with preserving an order (e.g. kept first detected cycle)
