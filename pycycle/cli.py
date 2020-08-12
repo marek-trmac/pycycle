@@ -73,7 +73,7 @@ def cli(ctx, verbose=False, help=False, source=None, here=False, ignore='', enco
         click.echo(crayons.yellow(
             'Project successfully transformed to AST, checking imports for cycles..'))
 
-        cycles = detect_cycles(root_nodes)
+        cycles = detect_cycles(root_nodes, verbose)
         if cycles:
             click.echo(crayons.red('Cycle Found :('))
             for descr in cycles:

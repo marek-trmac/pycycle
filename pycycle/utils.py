@@ -47,7 +47,7 @@ class Node(object):
         self.imports.append(item)
 
     def __repr__(self):
-        return str(len(self.imports))
+        return self.name + ':' + str(len(self.imports))
 
     def is_imported_from_any(self, nodes: List['Node']) -> bool:
         """:return: whether the node is imported by any node from the given list"""
@@ -152,23 +152,29 @@ def read_project(root_path: str, verbose: bool = False, ignore: Optional[List[st
                                 if not _add_new_node(root_path, subnode.name, ast_node.lineno, nodes, node, full_path):
                                     _add_missing_module(missing_modules, root_path, subnode.name)
 
-                        elif isinstance(ast_node, ast.ImportFrom) and ast_node.module:
-                            current_path = root_path
-                            if 0 <= ast_node.lineno - 1 < len(lines) and\
-                                    REGEX_RELATIVE_PATTERN.findall(lines[ast_node.lineno - 1]):
+                        elif isinstance(ast_node, ast.ImportFrom):
+                            if ast_node.module is None:
                                 current_path = root
-
-                            if not _add_new_node(current_path, ast_node.module, ast_node.lineno, nodes, node, full_path):
                                 for obj_import in ast_node.names:
-                                    module = ast_node.module + '.' + obj_import.name
-                                    if not _add_new_node(current_path, module, ast_node.lineno, nodes, node, full_path):
+                                    if not _add_new_node(current_path, obj_import.name, ast_node.lineno, nodes, node, full_path):
                                         _add_missing_module(missing_modules, current_path, module)
                             else:
-                                for obj_import in ast_node.names:
-                                    if ast_node.lineno not in node.func_imports:
-                                        node.func_imports[ast_node.lineno] = [obj_import.name]
-                                    else:
-                                        node.func_imports[ast_node.lineno].append(obj_import.name)
+                                current_path = root_path
+                                if 0 <= ast_node.lineno - 1 < len(lines) and\
+                                        REGEX_RELATIVE_PATTERN.findall(lines[ast_node.lineno - 1]):
+                                    current_path = root
+
+                                if not _add_new_node(current_path, ast_node.module, ast_node.lineno, nodes, node, full_path):
+                                    for obj_import in ast_node.names:
+                                        module = ast_node.module + '.' + obj_import.name
+                                        if not _add_new_node(current_path, module, ast_node.lineno, nodes, node, full_path):
+                                            _add_missing_module(missing_modules, current_path, module)
+                                else:
+                                    for obj_import in ast_node.names:
+                                        if ast_node.lineno not in node.func_imports:
+                                            node.func_imports[ast_node.lineno] = [obj_import.name]
+                                        else:
+                                            node.func_imports[ast_node.lineno].append(obj_import.name)
 
                         elif isinstance(ast_node, (ast.ClassDef, ast.FunctionDef)):
                             node.func_defs[ast_node.name] = ast_node.lineno
@@ -199,7 +205,7 @@ def _register_cycle(cycles: Dict[str, List[Node]], path: List, node: Node) -> No
     """Register detected cycle
 
     :param cycles: list of all detected cycles,
-                - key is not name, where cycle was detected
+                - key is node name, where cycle was detected
                 - value is path from the node to the node (e.g. description of the cycle)
     :param path: current path from root to the node
     :param node: where the cycle was detected
@@ -213,12 +219,13 @@ def _register_cycle(cycles: Dict[str, List[Node]], path: List, node: Node) -> No
     cycles[node.name] = path
 
 
-def _detect_cycles(cycles: Dict[str, List[Node]], node: Node, path: List) -> bool:
+def _detect_cycles(node: Node, path: List[Node], cycles: Dict[str, List[Node]], verbose: bool) -> bool:
     """Helper recursive function to find cycles for the parsed node.
 
-    :param cycles: result of the operation, key is name of the node, where the cycle was found; value is path from the node to the node
     :param node: current node to search for a cycle
     :param path: current path to the node
+    :param cycles: result of the operation, key is name of the node, where the cycle was found; value is path from the node to the node
+    :param verbose: to print debug info
     :return:
     """
     result = False
@@ -228,8 +235,12 @@ def _detect_cycles(cycles: Dict[str, List[Node]], node: Node, path: List) -> boo
 
     new_path = list(path)
     new_path.append(node)
+    if verbose:
+        path_str = '/'.join([node.name for node in new_path])
+        click.echo(crayons.yellow('Checking path: {path_str}'))
+    print()
     for item in node.imports:
-        if _detect_cycles(cycles, item, new_path):
+        if _detect_cycles(item, new_path, cycles, verbose):
             result = True
     return result
 
@@ -282,21 +293,24 @@ class CyclePath:
             return ''
 
 
-def detect_cycles(nodes: Iterable[Node]) -> List[str]:
+def detect_cycles(nodes: Iterable[Node], verbose: bool = False) -> List[str]:
     """Detected cycles in given nodes
 
     :param nodes: dictionary of parse nodes, key is ???, value is Node instance
+    :param verbose: True to report detailed info about progress (for debugging)
     :return: list of found cycles
     """
     cycles = dict()
     # first detect cycles from root nodes
     for node in nodes:
         if len(node.is_imported_from) == 0:
-            _detect_cycles(cycles, node, list())
+            print('### Checking root node: ' + node.name)
+            _detect_cycles(node, list(), cycles, verbose)
     # second detect cycles from non-root nodes
     for node in nodes:
         if len(node.is_imported_from) > 0:
-            _detect_cycles(cycles, node, list())
+            print('### Checking non-root node: ' + node.name)
+            _detect_cycles(node, list(), cycles, verbose)
 
     # remove duplicated cycles with preserving an order (e.g. kept first detected cycle)
     cycles_list = []
