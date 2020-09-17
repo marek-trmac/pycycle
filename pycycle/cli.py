@@ -7,9 +7,10 @@ import sys
 import click
 import crayons
 
-from pycycle.utils import read_project, detect_cycles
+from pycycle.utils import read_project, detect_cycles, set_package_levels, is_any_package_level_problem
 # local imports
 from .__version__ import __version__
+from .config import load_config
 
 
 def format_help(_help):
@@ -68,6 +69,9 @@ def cli(ctx, verbose=False, help=False, source=None, here=False, ignore='', enco
             click.echo(crayons.red('Directory does not exist.'), err=True)
             sys.exit(1)
 
+        package_levels = load_config(os.path.join(source, '.pycycle'))
+        set_package_levels(package_levels)
+
         root_nodes = read_project(source, verbose=verbose, ignore=ignore.split(','), encoding=encoding)
 
         click.echo(crayons.yellow(
@@ -80,6 +84,10 @@ def cli(ctx, verbose=False, help=False, source=None, here=False, ignore='', enco
                 click.echo(descr)
             sys.exit(1)
 
-        click.echo(crayons.green(('No worries, no cycles here!')))
+        if is_any_package_level_problem():
+            click.echo(crayons.red('Invalid package import :('))
+            sys.exit(1)
+
+        click.echo(crayons.green('No worries, no cycles here!'))
         click.echo(crayons.green('If you think some cycle was missed, please open an Issue on Github.'))
         sys.exit(0)

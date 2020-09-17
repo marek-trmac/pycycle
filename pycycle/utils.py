@@ -6,7 +6,7 @@ import re
 import sys
 import traceback
 from collections import defaultdict
-from typing import Dict, List, Optional, Iterable
+from typing import Dict, List, Optional, Iterable, Set
 
 import click
 import crayons
@@ -20,6 +20,40 @@ REGEX_RELATIVE_PATTERN = re.compile('from \\.')
 
 # logger
 _LOGGER = logging.getLogger(__name__)
+
+package_levels: List[List[str]] = []
+
+package_level_problems: Set[str] = set()
+
+project_root_path: str = ''
+
+
+def set_package_levels(levels: List[List[str]]) -> None:
+    """Sets configuration for package levels
+    :param levels: configuration read from config JSON file"""
+    global package_levels
+    package_levels = levels
+
+
+def _find_package_level(name: str) -> int:
+    """Helper function assigning package level to node
+    :param name: node name including full package name"""
+    result = -1  # if it is not assigned to any level, it is assumed as highest level that can use any existing package
+    result_package = ''
+    if len(package_levels) > 0:
+        for level, lvlpacks in enumerate(package_levels):
+            for pckg in lvlpacks:
+                if (len(pckg) > len(result_package)) and name.startswith(pckg + '.'):
+                    result = level
+                    result_package = pckg
+        if (result == -1) and ('.' in name):
+            print('Warning: package level is not specified: ' + name)
+    return result
+
+
+def is_any_package_level_problem() -> bool:
+    """:return: whether there was reported any package-level import problem"""
+    return len(package_level_problems) > 0
 
 
 class Node(object):
@@ -39,6 +73,7 @@ class Node(object):
         self.func_imports = {}
         self.func_defs = {}
         self.is_in_context = False
+        self.package_level = _find_package_level(name)
 
     def __iter__(self):
         return iter(self.imports)
@@ -60,20 +95,22 @@ class Node(object):
 def _add_new_node(root_path: str, name: str, lineno: int, nodes: Dict[str, Node], node: Node, full_path: str) -> bool:
     """Adds new node into list of nodes.
 
-    :param root_path: absolute path to the module
+    :param root_path: absolute path to the current module
     :param name: of the imported module
     :param lineno: line number, where the import was found
-    :param nodes: already imported nodas
+    :param nodes: already imported nodes
     :param node:
     :param full_path: full path to parent node, that imported new node
-    :return: True if new node added; False ownerwise
+    :return: True if new node added; False otherwise
     """
     path_to_module = get_path_from_package_name(root_path, name)
 
     if path_to_module in nodes:
         new_node = nodes[path_to_module]
     elif os.path.isfile(path_to_module):
-        new_node = Node(name, full_path=path_to_module)
+        assert path_to_module.startswith(project_root_path)
+        qualified_name = path_to_module[len(project_root_path) + 1:-3].replace('\\', '/').replace('/', '.')
+        new_node = Node(qualified_name, full_path=path_to_module)
         nodes[path_to_module] = new_node
     else:
         new_node = None
@@ -110,8 +147,10 @@ def read_project(root_path: str, verbose: bool = False, ignore: Optional[List[st
     nodes = {}  # Dict[str, Node]
     root_node = None
     errors = False
-    ignore_files = set([".hg", ".svn", ".git", ".tox", "__pycache__", "env", "venv"]) # python 2.6 comp
+    ignore_files = set([".hg", ".svn", ".git", ".tox", "__pycache__", "env", "venv"])  # python 2.6 comp
     missing_modules = []
+    global project_root_path
+    project_root_path = root_path
 
     if ignore:
         for ignored_file in ignore:
@@ -119,6 +158,10 @@ def read_project(root_path: str, verbose: bool = False, ignore: Optional[List[st
 
     # traverse root directory, and list directories as dirs and files as files
     for root, dirs, files in os.walk(root_path):
+        assert root.startswith(root_path)
+        module_prefix = root[len(root_path) + 1:].replace('\\', '/').replace('/', '.')
+        if len(module_prefix) > 0:
+            module_prefix += '.'
 
         dirs[:] = [d for d in dirs if d not in ignore_files]
 
@@ -138,7 +181,7 @@ def read_project(root_path: str, verbose: bool = False, ignore: Optional[List[st
                     if full_path in nodes:
                         node = nodes[full_path]
                     else:
-                        node = Node(file_name[:-3], full_path=full_path)
+                        node = Node(module_prefix + file_name[:-3], full_path=full_path)
                         nodes[full_path] = node
 
                     if not root_node:
@@ -219,6 +262,16 @@ def _register_cycle(cycles: Dict[str, List[Node]], path: List, node: Node) -> No
     cycles[node.name] = path
 
 
+def _check_package_level(node: Node, item: Node) -> None:
+    """Check if there is package-"""
+    if (node.package_level >= 0) and (item.package_level >= 0):
+        if node.package_level < item.package_level:
+            prblm = node.name + '-' + item.name
+            if prblm not in package_level_problems:
+                package_level_problems.add(prblm)
+                click.echo(crayons.red(f'Invalid package level import: {node.name} imports {item.name}'))
+
+
 def _detect_cycles(node: Node, path: List[Node], cycles: Dict[str, List[Node]], verbose: bool) -> bool:
     """Helper recursive function to find cycles for the parsed node.
 
@@ -239,6 +292,7 @@ def _detect_cycles(node: Node, path: List[Node], cycles: Dict[str, List[Node]], 
         path_str = '/'.join([node.name for node in new_path])
         click.echo(crayons.white(f'Checking path: {path_str}'))
     for item in node.imports:
+        _check_package_level(node, item)
         if _detect_cycles(item, new_path, cycles, verbose):
             result = True
     return result

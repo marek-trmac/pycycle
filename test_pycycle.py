@@ -1,23 +1,17 @@
 from __future__ import print_function
+
 import os
-import pytest
 
 import pycycle.utils
 
 
 def test_get_path_from_package_name():
-
     func = pycycle.utils.get_path_from_package_name
-
     assert func('/test/one/two', 'some.package') == os.path.normpath('/test/one/two/some/package.py')
     assert func('', 'some.package') == ''
     assert func('/', None) == ''
     assert func(None, 'some.package') == ''
     assert func('/test/', 'some_package') == os.path.normpath('/test/some_package.py')
-
-
-def test_format_path():
-    pass
 
 
 def test_simple_project():
@@ -68,7 +62,7 @@ def test_large_no_circle():
 def test_relative_imports():
     project = {'path': os.path.abspath('./tests/_projects/relative_imports'),
                'has_cycle': True,
-               'result': 'myapp.models -> managers: Line 1 =>> myapp.models'}
+               'result': 'myapp.models -> myapp.managers: Line 1 =>> myapp.models'}
     nodes = pycycle.utils.read_project(project['path'])
     assert nodes is not None
     assert bool(pycycle.utils.detect_cycles(nodes)) == project['has_cycle']
